@@ -1,0 +1,32 @@
+FROM quay.io/fedora/fedora-coreos:stable
+
+ARG K3S_VERSION
+RUN test -n "${K3S_VERSION}" || (echo "K3S_VERSION not set" && false)
+
+ARG TARGETARCH
+
+COPY rancher-k3s-common-stable.repo /etc/yum.repos.d/
+RUN rpm-ostree install k3s-selinux && \
+    rpm-ostree cleanup -m
+
+COPY --chmod=744 k3s/install.sh /usr/libexec/k3s/
+COPY install-k3s.sh /usr/bin/
+
+RUN case $TARGETARCH in amd64) export SUFFIX='';; arm64) export SUFFIX='-arm64';; esac
+
+RUN curl -# -L https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION}/k3s${SUFFIX} \
+    -o /usr/libexec/k3s/k3s${SUFFIX}
+
+RUN curl -# -L -o /usr/libexec/k3s/k3s-airgap-images-${TARGETARCH}.tar.zst \
+    https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION}/k3s-airgap-images-${TARGETARCH}.tar.zst
+
+RUN cd /usr/libexec/k3s && \
+    curl -# -L https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION}/sha256sum-${TARGETARCH}.txt | \
+        sha256sum --check --ignore-missing
+
+RUN [ "k3s${SUFFIX}" != "k3s" ] && mv /usr/libexec/k3s/k3s${SUFFIX} /usr/libexec/k3s/k3s || true
+
+RUN sed -i '/export INSTALL_K3S_SKIP_SELINUX_RPM=true/a export INSTALL_K3S_SKIP_DOWNLOAD=true' \
+    /usr/bin/install-k3s.sh
+
+RUN ostree container commit
